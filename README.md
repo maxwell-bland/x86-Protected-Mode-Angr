@@ -79,11 +79,21 @@ state.regs.gdt = state.solver.Concat(claripy.BVV(
         0x00003964, 32), claripy.BVV(0x00000417, 32)).zero_extend(16)
 state.regs.ldt = state.solver.Concat(claripy.BVV(
     0x00003fa4, 32), claripy.BVV(0x0000011f, 32)).zero_extend(16)
-state.memory.store(0x00204e0c,claripy.BVS('buffer',9*8))
+
+state.memory.store(0x00204d0c,claripy.BVS('buffer2',9*8),
+    disable_actions=True, inspect=False
+)
+state.memory.store(0x00204e0c,claripy.BVS('buffer',9*8),
+    disable_actions=True, inspect=False
+)
+
 x86 = AngrX86().x86init(state)
 sm = p.factory.simulation_manager(state)
 
-while sm.active:
-    sm.step(successor_func=x86step)
-IPython.embed()
+try:
+    while sm.active:
+        print(sm.active)
+        sm.step(successor_func=x86step)
+except:
+    IPython.embed()
 ```

@@ -31,14 +31,21 @@ def dt_lookup(state, sel, offset, base=None):
     return seg_base + offset
 
 def x86step(state, **kwargs):
-    eip_base = dt_lookup( state, 
-                         state.solver.eval(state.regs.cs), 
-                         0)
-    state.regs.pc += eip_base
+    if state.history.jump_balance < 0:
+        eip_base = dt_lookup(state, state.solver.eval(state.regs.cs), 0)
+        state.regs.pc += eip_base
+        state.history.jump_balance = 0
+
     successors = state.project.factory.successors(state, **kwargs)
-    state.regs.pc -= eip_base
+
     for s in successors:
-        s.regs.pc -= eip_base
+        if s.history.jumpkind == 'Ijk_Ret':
+            s.history.jump_balance = state.history.jump_balance - 1
+        elif s.history.jumpkind == 'Ijk_Call':
+            s.history.jump_balance = state.history.jump_balance + 1
+        else:
+            s.history.jump_balance = state.history.jump_balance
+
     return successors
 
 class AngrX86():
@@ -100,7 +107,11 @@ class AngrX86():
         
 
     def x86init(self, state):
+        eip_base = dt_lookup(state, state.solver.eval(state.regs.cs), 0)
+        state.regs.pc += eip_base
+        # If the jump balance is negative, return instructions do not properly 
+        # preserve eip offset.
+        state.history.jump_balance = 0
+
         state.inspect.b('mem_write', when=angr.BP_BEFORE, action=lambda s: self.x86_translate(s,'write'))
         state.inspect.b('mem_read', when=angr.BP_BEFORE, action=lambda s: self.x86_translate(s))
-        state.inspect.b('mem_write', when=angr.BP_AFTER, action=lambda s: self.x86_translate(s,'write'))
-        state.inspect.b('mem_read', when=angr.BP_AFTER, action=lambda s: self.x86_translate(s))

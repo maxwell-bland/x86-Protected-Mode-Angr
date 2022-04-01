@@ -31,17 +31,14 @@ def dt_lookup(state, sel, offset, base=None):
     return seg_base + offset
 
 def x86step(state, **kwargs):
-    eip_base = dt_lookup(
-    state, 
-                         state.solver.eval(
-                             state.regs.cs
-                         ), 
+    eip_base = dt_lookup( state, 
+                         state.solver.eval(state.regs.cs), 
                          0)
-    state.regs.eip += eip_base
+    state.regs.pc += eip_base
     successors = state.project.factory.successors(state, **kwargs)
-    state.regs.eip -= eip_base
+    state.regs.pc -= eip_base
     for s in successors:
-        s.regs.eip -= eip_base
+        s.regs.pc -= eip_base
     return successors
 
 class AngrX86():
@@ -84,7 +81,6 @@ class AngrX86():
                 return self.reg_map[mi.segment].lower()
     
     def x86_translate(self, state, t='read'):
-        state.block().pp()
         seg = self.get_accessed_seg(
             [i for i in Decoder(32, state.block().disassembly.insns[0].bytes)][0], t
         )

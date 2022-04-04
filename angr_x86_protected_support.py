@@ -35,6 +35,13 @@ def get_mem_info(mem_info):
             'displacement': displacement, 'index_reg': index_reg,
             'access_type': access_type}
 
+def get_cur_inst(state):
+    pc = ( state.solver.eval(state.regs.pc) + 
+        dt_lookup(state, state.solver.eval(state.regs.cs), 0))
+    instr_bytes = state.solver.eval( state.memory.load( 
+        pc, 0x10, disable_actions=True, inspect=False), cast_to=bytes)
+    return [i for i in Decoder(32, instr_bytes)][0]
+
 # GDT and LDT lookups
 
 def dt_lookup(state, sel, offset, base=None):
@@ -84,14 +91,11 @@ def les_fix(state, inst_len, write_reg='eax', seg='ds', base_reg=None, scale=1, 
     state.regs.pc += inst_len
 
 def x86_instruction_fixes(state):
-    i = [i for i in Decoder(
-        32, state.solver.eval(
-            state.memory.load(
-                state.addr, 
-                20, 
-                disable_actions=True, 
-                inspect=False
-            ), cast_to=bytes))][0]
+    # The x86 instruction set guarantees instructions are no more than 15 bytes
+    pc = ( state.solver.eval(state.addr) )
+    instr_bytes = state.solver.eval( state.memory.load( 
+        pc, 0x10, disable_actions=True, inspect=False), cast_to=bytes)
+    i = [i for i in Decoder(32, instr_bytes)][0]
     if MNEMONIC_MAP.get(i.mnemonic) == 'LES':
         info = INFO_FACT.info(i)
         mi = info.used_memory()[0]
@@ -102,11 +106,6 @@ def x86_instruction_fixes(state):
 # Custom simulation steppers
 
 def x86step(state, **kwargs):
-    if state.history.jump_balance < 0:
-        eip_base = dt_lookup(state, state.solver.eval(state.regs.cs), 0)
-        state.regs.pc += eip_base
-        state.history.jump_balance = 0
-
     successors = state.project.factory.successors(state, **kwargs)
 
     for s in successors:
@@ -121,6 +120,11 @@ def x86step(state, **kwargs):
             s.history.jump_balance = state.history.jump_balance + 1
         else:
             s.history.jump_balance = state.history.jump_balance
+
+        if s.history.jump_balance < 0:
+            eip_base = dt_lookup(s, s.solver.eval(s.regs.cs), 0)
+            s.regs.pc += eip_base
+            s.history.jump_balance = 0
 
     return successors
 
@@ -139,11 +143,31 @@ class AngrX86():
             ot = 'write' if 'WRITE' in OPAC_MAP[mi.access] else 'read'
             if ot == t:
                 return REG_MAP[mi.segment].lower()
+
+    def x86_indirect_call_handle(self, state):
+        pc = ( state.history.jump_source )
+        instr_bytes = state.solver.eval( state.memory.load( 
+            pc, 0x10, disable_actions=True, inspect=False), cast_to=bytes)
+        i = [i for i in Decoder(32, instr_bytes)][0]
+        if MNEMONIC_MAP.get(i.mnemonic) == 'CALL':
+            # TODO: ensure stack pushes and pops result in a non-translated eip
+            # a regular call will have 2 registers, esp and ss, indirect will 
+            # have more... maybe an access to cs for long call
+            num_used_regs = len(INFO_FACT.info(i).used_registers())
+            if num_used_regs == 4:
+                state.inspect.function_address += dt_lookup(
+                    state, state.solver.eval(state.regs.cs), 0)
+            elif  num_used_regs > 4:
+                raise Exception('Call with number of used regs > 4!')
     
     def x86_translate(self, state, t='read'):
-        seg = self.get_accessed_seg(
-            [i for i in Decoder(32, state.block().disassembly.insns[0].bytes)][0], t
-        )
+        pc = ( state.solver.eval(state.addr) )
+        instr_bytes = state.solver.eval( state.memory.load( 
+            pc, 0x10, disable_actions=True, inspect=False), cast_to=bytes)
+        i = [i for i in Decoder(32, instr_bytes)][0]
+        seg = self.get_accessed_seg(i, t)
+
+
 
         # Weird mismatched read to write problem in angr
         if not seg:
@@ -168,5 +192,6 @@ class AngrX86():
         # preserve eip offset.
         state.history.jump_balance = 0
 
+        state.inspect.b('call', when=angr.BP_BEFORE, action=lambda s: self.x86_indirect_call_handle(s))
         state.inspect.b('mem_write', when=angr.BP_BEFORE, action=lambda s: self.x86_translate(s,'write'))
         state.inspect.b('mem_read', when=angr.BP_BEFORE, action=lambda s: self.x86_translate(s))

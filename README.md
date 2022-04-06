@@ -19,14 +19,8 @@ pip3 install iced_x86
 Example use:
 ```
 #!/usr/bin/env python3
-import traceback
 from angr_x86_protected_support import *
 
-entry_points = {
-        'set_two_fields': 0x1080cb9,
-        'parse_ops': 0x108ba40,
-        'while_loops': 0x1094d80
-}
 loader = cle.Loader('app.bin',
                     main_opts={'backend': 'blob', 
                                'arch': 'i386',
@@ -59,6 +53,7 @@ b = cle.backends.Blob(dt, open(dt, 'rb'), loader=loader, is_main_bin=False, arch
 loader.dynamic_load(b)
 
 p = angr.Project(loader)
+
 state = p.factory.entry_state()
 state.regs.cs = 0x00000007 
 state.regs.eip = 0xb99
@@ -81,20 +76,16 @@ state.regs.gdt = state.solver.Concat(claripy.BVV(
 state.regs.ldt = state.solver.Concat(claripy.BVV(
     0x00003fa4, 32), claripy.BVV(0x0000011f, 32)).zero_extend(16)
 
-buf0 = state.solver.Unconstrained('buffer2',9*8)
-buf1 = state.solver.Unconstrained('buffer',9*8)
-state.memory.store(0x00204d0c, buf0, disable_actions=True, inspect=False)
-state.memory.store(0x00204e0c, buf1, disable_actions=True, inspect=False)
+buf0 = state.solver.Unconstrained('buffer',30*8)
+state.memory.store(0x131754, buf0, disable_actions=True, inspect=False)
+bufs = [buf0]
 
 x86init(state)
 sm = p.factory.simulation_manager(state)
 
-sm.use_technique(angr.exploration_techniques.unique.UniqueSearch())  
-try:
-    while sm.active:
-        sm.step(successor_func=x86step)
-        print(sm.active)
-except:
-    print(traceback.format_exc())
-    IPython.embed()
+p.hook(0x310447, hook=lambda s: handle_bad_dword_ptr_call(s,'edx',0x10270))
+p.hook(0x30794d, hook=lambda s: handle_bad_dword_ptr_call(s,'eax',0x77e0))
+
+while sm.active:
+    sm.step(successor_func=x86step)
 ```

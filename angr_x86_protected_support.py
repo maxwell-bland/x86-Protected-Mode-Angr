@@ -106,6 +106,16 @@ def mem_translate(state, t='read'):
 
 # Instruction handlers
 
+def handle_bad_dword_ptr_call(s, scale_reg, offset):
+    s.regs.pc = s.memory.load(
+        dt_lookup(
+            s, 
+            s.solver.eval(s.regs.cs),
+            s.solver.eval(getattr(s.regs,scale_reg)) * 4 + offset
+        ), 4, disable_actions=True, inspect=False).reversed + dt_lookup(
+            s, s.solver.eval(s.regs.cs), 0)
+    s.stack_push(s.regs.pc)
+
 def memory_translate(state, seg='ds', base_reg=None, scale=1, displacement=0, index_reg=None, **kwargs):
     addr = 0
     if base_reg:
